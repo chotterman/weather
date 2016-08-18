@@ -14,6 +14,7 @@ import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import com.google.api.client.auth.oauth2.Credential;
@@ -22,6 +23,7 @@ import com.google.api.client.extensions.jetty.auth.oauth2.LocalServerReceiver;
 import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
 import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.http.FileContent;
 import com.google.api.client.http.HttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
@@ -30,6 +32,7 @@ import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.DriveScopes;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
+import com.google.api.services.drive.model.Permission;
 
 /**
  * This program demonstrates how to use the Watch Service API to monitor change events for a
@@ -113,28 +116,37 @@ public class WeatherStationDaemon {
                 .setApplicationName(APPLICATION_NAME)
                 .build();
     }
+    private static Permission insertPermission(Drive service, String fileId,
+    	      String value, String type, String role) {
+    	    Permission newPermission = new Permission();
+
+    	    newPermission.setValue(value);
+    	    newPermission.setType(type);
+    	    newPermission.setRole(role);
+    	    try {
+    	      return service.permissions().insert(fileId, newPermission).execute();
+    	    } catch (IOException e) {
+    	      System.out.println("An error occurred: " + e);
+    	    }
+    	    return null;
+    	  }
+
 
     public static void main(String[] args) throws IOException {
         // Build a new authorized API client service.
         Drive service = getDriveService();
 
-        // Print the names and IDs for up to 10 files.
-        FileList result = service.files().list()
-             .setPageSize(10)
-             .setFields("nextPageToken, files(id, name)")
-             .execute();
-        List<File> files = result.getFiles();
-        if (files == null || files.size() == 0) {
-            System.out.println("No files found.");
-        } else {
-            System.out.println("Files:");
-            for (File file : files) {
-                System.out.printf("%s (%s)\n", file.getName(), file.getId());
-            }
-        }
+        File fileMetadata = new File();
+        fileMetadata.setName("weather_" + System.currentTimeMillis());
+        fileMetadata.setMimeType("application/vnd.google-apps.folder");
+
+        File file = service.files().create(fileMetadata)
+                .setFields("id")
+                .execute();
+        System.out.println("Folder ID: " + file.getId());
         try {
             WatchService watcher = FileSystems.getDefault().newWatchService();
-            Path dir = Paths.get("home/pi/weather/results");
+            Path dir = Paths.get("C:\\weather");
             dir.register(watcher, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
 
             System.out.println("Watch Service registered for dir: " + dir.getFileName());
@@ -157,7 +169,15 @@ public class WeatherStationDaemon {
                     System.out.println(kind.name() + ": " + fileName);
 
                     if (kind == ENTRY_CREATE) {
-                        //TODO : READ JSON FROM TXT FILE AND SEND TO WS
+                    	File live_txt_metadata = new File();
+                    	fileMetadata.setName("data_sample.txt");
+                    	fileMetadata.setParents(Collections.singletonList(file.getId()));
+                    	java.io.File filePath = new java.io.File("C:\\weather\\live_json.txt");
+                    	FileContent mediaContent = new FileContent("application/txt", filePath);
+                    	File newFile = service.files().create(fileMetadata, mediaContent)
+                    	        .setFields("id, parents")
+                    	        .execute();
+                    	System.out.println("File ID: " + newFile.getId());
                     }
                     if (kind == ENTRY_MODIFY && fileName.toString().equals("DirectoryWatchDemo.java")) {
                         System.out.println("My source file has changed!!!");
